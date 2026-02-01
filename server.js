@@ -6,18 +6,18 @@ require('dotenv').config();
 const app = express();
 
 // הגדרות Middleware
-app.use(cors()); // מאפשר גישה מכתובות חיצוניות (כמו Lovable)
-app.use(express.json()); // מאפשר לשרת לקרוא JSON בגוף הבקשה (Body)
+app.use(cors()); 
+app.use(express.json()); 
 
 // חיבור למסד הנתונים PostgreSQL ב-Render
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // חובה עבור חיבורים חיצוניים ל-Render PostgreSQL
+    rejectUnauthorized: false 
   }
 });
 
-// וודא חיבור תקין למסד הנתונים בעת העלייה
+// וודא חיבור תקין למסד הנתונים
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Error acquiring client', err.stack);
@@ -28,21 +28,21 @@ pool.connect((err, client, release) => {
 
 // --- API Endpoints ---
 
-// 1. התחברות (Login) - בדיקה אם המשתמש קיים לפי אימייל
+// 1. התחברות (Login)
 app.post('/api/auth/login', async (req, res) => {
   const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: "Email is required" });
+  
+  // בדיקה שהאימייל הגיע ואינו ריק למניעת שגיאת toLowerCase
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ success: false, message: "Email is required" });
   }
 
   try {
-    const result = await pool.query('SELECT * FROM profiles WHERE email = $1', [email.toLowerCase()]);
+    const result = await pool.query('SELECT * FROM profiles WHERE email = $1', [email.toLowerCase().trim()]);
     
     if (result.rows.length > 0) {
-      // משתמש נמצא - מחזירים את כל פרטי הפרופיל שלו
       res.json({ success: true, user: result.rows[0] });
     } else {
-      // משתמש לא נמצא
       res.status(404).json({ success: false, message: "User not found" });
     }
   } catch (err) {
@@ -55,19 +55,34 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/profiles', async (req, res) => {
   const { email, role, name, position, location, salary_info, availability } = req.body;
   
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: "Valid email is required" });
+  }
+
   try {
     const query = `
       INSERT INTO profiles (email, role, name, position, location, salary_info, availability) 
       VALUES ($1, $2, $3, $4, $5, $6, $7) 
       ON CONFLICT (email) DO UPDATE SET 
         role = EXCLUDED.role, 
-        name = EXCLUDED.name, 
-        position = EXCLUDED.position
+        name = EXCLUDED.name,
+        position = EXCLUDED.position,
+        location = EXCLUDED.location,
+        salary_info = EXCLUDED.salary_info,
+        availability = EXCLUDED.availability
       RETURNING *`;
     
-    const values = [email.toLowerCase(), role, name, position, location, salary_info, JSON.stringify(availability)];
-    const result = await pool.query(query, values);
+    const values = [
+      email.toLowerCase().trim(), 
+      role, 
+      name, 
+      position, 
+      location, 
+      salary_info, 
+      typeof availability === 'object' ? JSON.stringify(availability) : availability
+    ];
     
+    const result = await pool.query(query, values);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -75,12 +90,10 @@ app.post('/api/profiles', async (req, res) => {
   }
 });
 
-// 3. קבלת פיד כרטיסי Swipe (סינון לפי תפקיד נגדי ותפקיד מקצועי זהה)
+// 3. קבלת פיד כרטיסי Swipe
 app.get('/api/feed/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    
-    // שליפת פרטי המשתמש הסורק
     const userResult = await pool.query('SELECT * FROM profiles WHERE id = $1', [userId]);
     const user = userResult.rows[0];
 
@@ -88,7 +101,6 @@ app.get('/api/feed/:userId', async (req, res) => {
 
     const targetRole = user.role === 'STAFF' ? 'CLINIC' : 'STAFF';
 
-    // שאילתה שמביאה אנשים מהתפקיד הנגדי, באותו מקצוע, שטרם נעשה להם סוויפ
     const query = `
       SELECT * FROM profiles 
       WHERE role = $1 
@@ -106,26 +118,23 @@ app.get('/api/feed/:userId', async (req, res) => {
   }
 });
 
-// 4. ביצוע Swipe (Like/Pass) ובדיקת התאמה (Match)
+// 4. ביצוע Swipe ובדיקת Match
 app.post('/api/swipe', async (req, res) => {
   const { swiper_id, swiped_id, type } = req.body;
 
   try {
-    // שמירת הסוויפ הנוכחי
     await pool.query(
       'INSERT INTO swipes (swiper_id, swiped_id, type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
       [swiper_id, swiped_id, type]
     );
 
     if (type === 'LIKE') {
-      // בדיקה אם הצד השני כבר עשה LIKE למשתמש הנוכחי
       const matchCheck = await pool.query(
         'SELECT * FROM swipes WHERE swiper_id = $1 AND swiped_id = $2 AND type = $3',
         [swiped_id, swiper_id, 'LIKE']
       );
 
       if (matchCheck.rows.length > 0) {
-        // נוצר Match - שמירה בטבלה
         await pool.query(
           'INSERT INTO matches (user_one_id, user_two_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
           [swiper_id, swiped_id]
@@ -140,7 +149,6 @@ app.post('/api/swipe', async (req, res) => {
   }
 });
 
-// הגדרת פורט והרצת השרת
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`ClinicMatch Backend is live on port ${PORT}`);
