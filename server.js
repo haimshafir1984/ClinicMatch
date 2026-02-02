@@ -34,7 +34,10 @@ app.post('/api/profiles', async (req, res) => {
     const query = `
       INSERT INTO profiles (email, role, name, position, location, salary_info, availability) 
       VALUES ($1, $2, $3, $4, $5, $6, $7) 
-      ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, position = EXCLUDED.position
+      ON CONFLICT (email) DO UPDATE SET 
+        name = EXCLUDED.name, 
+        position = EXCLUDED.position,
+        location = EXCLUDED.location
       RETURNING *`;
     const values = [email.toLowerCase().trim(), role, name, position, location, salary_info, JSON.stringify(availability)];
     const result = await pool.query(query, values);
@@ -44,24 +47,38 @@ app.post('/api/profiles', async (req, res) => {
   }
 });
 
-// 3. פיד (Feed)
+// 3. פיד חכם (Feed): סינון לפי עיר + מיון לפי זמן
 app.get('/api/feed/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const userRes = await pool.query('SELECT role, position FROM profiles WHERE id = $1', [userId]);
+    
+    // שליפת פרטי המשתמש הנוכחי
+    const userRes = await pool.query('SELECT role, position, location FROM profiles WHERE id = $1', [userId]);
+    
     if (userRes.rows.length === 0) return res.json([]);
     const user = userRes.rows[0];
+    
     const targetRole = user.role === 'STAFF' ? 'CLINIC' : 'STAFF';
+
+    // השאילתה המעודכנת: התאמת תפקיד, מיקום זהה, והסרת משתמשים שכבר נצפו
     const query = `
-      SELECT id, name, position, location, salary_info, availability
+      SELECT id, name, position, location, salary_info, availability, created_at
       FROM profiles 
-      WHERE role = $1 AND position = $2
-      AND id NOT IN (SELECT swiped_id FROM swipes WHERE swiper_id = $3)
-      AND id != $3 LIMIT 20;
+      WHERE role = $1 
+      AND position = $2
+      AND location = $3
+      AND id NOT IN (SELECT swiped_id FROM swipes WHERE swiper_id = $4)
+      AND id != $4
+      ORDER BY created_at DESC
+      LIMIT 20;
     `;
-    const feed = await pool.query(query, [targetRole, user.position, userId]);
+    
+    // שליחת המיקום של המשתמש כפרמטר לסינון
+    const feed = await pool.query(query, [targetRole, user.position, user.location, userId]);
+    
     res.json(feed.rows);
   } catch (err) {
+    console.error("FEED ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -71,8 +88,10 @@ app.post('/api/swipe', async (req, res) => {
   const { swiper_id, swiped_id, type } = req.body;
   try {
     await pool.query('INSERT INTO swipes (swiper_id, swiped_id, type) VALUES ($1, $2, $3)', [swiper_id, swiped_id, type]);
+    
     if (type === 'LIKE') {
       const matchCheck = await pool.query('SELECT * FROM swipes WHERE swiper_id = $1 AND swiped_id = $2 AND type = $3', [swiped_id, swiper_id, 'LIKE']);
+      
       if (matchCheck.rows.length > 0) {
         const matchRes = await pool.query(
           'INSERT INTO matches (user_one_id, user_two_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
@@ -105,7 +124,7 @@ app.get('/api/matches/:userId', async (req, res) => {
   }
 });
 
-// 6. שליפת הודעות בצ'אט
+// 6. שליפת הודעות צ'אט
 app.get('/api/messages/:matchId', async (req, res) => {
   try {
     const { matchId } = req.params;
