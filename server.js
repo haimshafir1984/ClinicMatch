@@ -88,7 +88,7 @@ app.post('/api/profiles', async (req, res) => {
         position = EXCLUDED.position,
         location = EXCLUDED.location
       RETURNING *`;
-    const values = [email.toLowerCase().trim(), role, name, position, location, salary_info, JSON.stringify(availability)];
+    const values = [email.toLowerCase().trim(), role, name, position, location, finalSalary , JSON.stringify(availability)];
     
     const result = await pool.query(query, values);
     const user = result.rows[0];
