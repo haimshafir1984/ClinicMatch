@@ -110,7 +110,7 @@ app.post('/api/profiles', async (req, res) => {
   }
 });
 
-// 3. פיד (מוגן ע"י טוקן)
+// 3. פיד (מוגן ע"י טוקן) - גרסה משודרגת למערכים ומקצועות
 app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -120,28 +120,42 @@ app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
         return res.status(403).json({ error: "Access denied" });
     }
 
-    const userRes = await pool.query('SELECT role, position, location FROM profiles WHERE id = $1', [userId]);
+    // 1. שליפת פרטי המשתמש הנוכחי (כולל המערכים החדשים)
+    const userRes = await pool.query('SELECT role, positions, workplace_types, location FROM profiles WHERE id = $1', [userId]);
+    
     if (userRes.rows.length === 0) return res.json([]);
     const user = userRes.rows[0];
     
+    // מי אנחנו מחפשים? (הפוך מהתפקיד שלנו)
     const targetRole = user.role === 'STAFF' ? 'CLINIC' : 'STAFF';
 
+    // 2. השאילתה החכמה: חיתוך מערכים
+    // workplace_types && $2 -> האם יש חפיפה בסוג המקום? (למשל: שנינו סימנו 'Dental')
+    // positions && $3       -> האם יש חפיפה בתפקידים? (למשל: המרפאה מחפשת סייעת, ואני סייעת)
     const query = `
-      SELECT id, name, position, location, salary_info, availability, created_at
+      SELECT id, name, positions, workplace_types, location, salary_info, availability, created_at
       FROM profiles 
       WHERE role = $1 
-      AND position = $2
-      AND location = $3
-      AND id NOT IN (SELECT swiped_id FROM swipes WHERE swiper_id = $4)
-      AND id != $4
+      AND workplace_types && $2 
+      AND positions && $3
+      AND location = $4
+      AND id NOT IN (SELECT swiped_id FROM swipes WHERE swiper_id = $5)
+      AND id != $5
       ORDER BY created_at DESC LIMIT 20;
     `;
     
-    const feed = await pool.query(query, [targetRole, user.position, user.location, userId]);
+    const feed = await pool.query(query, [
+        targetRole, 
+        user.workplace_types, // המערך של המשתמש: באיזה תחומים אני עוסק/מחפש?
+        user.positions,       // המערך של המשתמש: איזה תפקידים אני ממלא/מחפש?
+        user.location, 
+        userId
+    ]);
+    
     res.json(feed.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+    console.error("Feed Error:", err);
+    res.status(500).json({ error:
 });
 
 // 4. סוויפ (מוגן + ולידציה כנגד ספאם)
