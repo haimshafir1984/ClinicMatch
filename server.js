@@ -148,6 +148,52 @@ app.post('/api/messages', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// --- ADMIN PANEL ENDPOINTS ---
+
+// בדיקת הרשאת אדמין (Middleware פשוט)
+const checkAdmin = async (req, res, next) => {
+  const { adminId } = req.body; // נשלח את ה-ID של המבקש בגוף הבקשה או ב-Query
+  // הערה: במוצר סופי נשתמש ב-Token, ל-MVP זה מספיק
+  if (!adminId) return res.status(403).json({ error: "Access denied" });
+  
+  const result = await pool.query('SELECT is_admin FROM profiles WHERE id = $1', [adminId]);
+  if (result.rows.length > 0 && result.rows[0].is_admin) {
+    next();
+  } else {
+    res.status(403).json({ error: "Admin access required" });
+  }
+};
+
+// 1. קבלת סטטיסטיקות
+app.post('/api/admin/stats', checkAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM admin_stats');
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. קבלת רשימת כל המשתמשים
+app.post('/api/admin/users', checkAdmin, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, name, email, role, position, is_blocked, created_at FROM profiles ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. חסימה/שחרור משתמש
+app.post('/api/admin/toggle-block', checkAdmin, async (req, res) => {
+  const { userIdToBlock, blockStatus } = req.body;
+  try {
+    await pool.query('UPDATE profiles SET is_blocked = $1 WHERE id = $2', [blockStatus, userIdToBlock]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`ClinicMatch Backend Pro live on port ${PORT}`));
