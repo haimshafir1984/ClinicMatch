@@ -52,13 +52,33 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// 2. רישום (Register) - עם בדיקות תקינות משופרות
+// 2. רישום (Register) - מתוקן לטיפול בטווח שכר
 app.post('/api/profiles', async (req, res) => {
+  console.log("Received Register Body:", req.body); 
+
   const { email, role, name, position, location, salary_info, availability } = req.body;
   
-  // בדיקה מקדימה שהמייל קיים
-  if (!email) return res.status(400).json({ error: "Email is required" });
+  if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: "Valid email is required" });
+  }
 
+  // --- התיקון מתחיל כאן ---
+  // אם השכר מגיע כאובייקט { min, max }, נהפוך אותו למספר ממוצע
+  let finalSalary = salary_info;
+  
+  if (typeof salary_info === 'object' && salary_info !== null) {
+      // חילוץ המספרים (אם הם קיימים)
+      const min = parseInt(salary_info.min) || 0;
+      const max = parseInt(salary_info.max) || 0;
+      
+      // אם יש גם מינימום וגם מקסימום, נחשב ממוצע. אחרת ניקח את הגבוה.
+      if (max > 0) {
+          finalSalary = Math.round((min + max) / 2);
+      } else {
+          finalSalary = min;
+      }
+  }
+  // --- סוף התיקון ---
   try {
     const query = `
       INSERT INTO profiles (email, role, name, position, location, salary_info, availability) 
