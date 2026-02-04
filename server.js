@@ -120,7 +120,7 @@ app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
         return res.status(403).json({ error: "Access denied" });
     }
 
-    // 1. שליפת פרטי המשתמש הנוכחי (כולל המערכים החדשים)
+    // 1. שליפת פרטי המשתמש הנוכחי
     const userRes = await pool.query('SELECT role, positions, workplace_types, location FROM profiles WHERE id = $1', [userId]);
     
     if (userRes.rows.length === 0) return res.json([]);
@@ -130,8 +130,6 @@ app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
     const targetRole = user.role === 'STAFF' ? 'CLINIC' : 'STAFF';
 
     // 2. השאילתה החכמה: חיתוך מערכים
-    // workplace_types && $2 -> האם יש חפיפה בסוג המקום? (למשל: שנינו סימנו 'Dental')
-    // positions && $3       -> האם יש חפיפה בתפקידים? (למשל: המרפאה מחפשת סייעת, ואני סייעת)
     const query = `
       SELECT id, name, positions, workplace_types, location, salary_info, availability, created_at
       FROM profiles 
@@ -146,8 +144,8 @@ app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
     
     const feed = await pool.query(query, [
         targetRole, 
-        user.workplace_types, // המערך של המשתמש: באיזה תחומים אני עוסק/מחפש?
-        user.positions,       // המערך של המשתמש: איזה תפקידים אני ממלא/מחפש?
+        user.workplace_types, // המערך של המשתמש
+        user.positions,       // המערך של המשתמש
         user.location, 
         userId
     ]);
@@ -155,9 +153,9 @@ app.get('/api/feed/:userId', authenticateToken, async (req, res) => {
     res.json(feed.rows);
   } catch (err) {
     console.error("Feed Error:", err);
-    res.status(500).json({ error:
+    res.status(500).json({ error: err.message });
+  }
 });
-
 // 4. סוויפ (מוגן + ולידציה כנגד ספאם)
 app.post('/api/swipe', authenticateToken, async (req, res) => {
   const { swiper_id, swiped_id, type } = req.body;
